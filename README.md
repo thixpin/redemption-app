@@ -72,6 +72,24 @@ inactive (410), already redeemed by that user (409), or over its limit (409).
 The redeem operation runs in a transaction with `SELECT ... FOR UPDATE`, so
 concurrent requests can never exceed a code's limit.
 
+## Testing
+
+Automated end-to-end tests (Node's built-in test runner + `supertest`) cover
+every endpoint, validation, the per-user and per-code limits, error cases, and
+concurrent-redemption safety.
+
+The tests need a running Postgres. They use `TEST_DATABASE_URL` if set,
+otherwise `DATABASE_URL`, and **truncate** that database's tables on each run —
+so point it at a throwaway DB. The included `.env` uses `redemption_test`:
+
+```bash
+docker compose up -d
+# one-time: create the test database
+docker compose exec db psql -U redemption -d redemption -c "CREATE DATABASE redemption_test;"
+
+npm test
+```
+
 ## Seeded demo codes
 
 `WELCOME10` (100 uses), `FREESHIP` (1 use), `GIFT50` (5 uses).
@@ -90,6 +108,8 @@ src/
   store.js     Data-access layer (async, transactional redeem)
   db.js        pg connection pool + schema/seed
   init-db.js   Standalone `npm run db:init` script
+test/
+  api.test.js  End-to-end API tests (npm test)
 docker-compose.yml   Local Postgres
 .env                 Connection config (git-ignored, loaded via dotenv)
 .env.example         Connection config template
