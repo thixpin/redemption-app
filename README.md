@@ -90,6 +90,15 @@ docker compose exec db psql -U redemption -d redemption -c "CREATE DATABASE rede
 npm test
 ```
 
+## Docker
+
+```bash
+docker build -t redemption-api:latest .
+docker run -p 3000:3000 \
+  -e DATABASE_URL="postgres://redemption:redemption@host.docker.internal:5432/redemption" \
+  redemption-api:latest
+```
+
 ## Seeded demo codes
 
 `WELCOME10` (100 uses), `FREESHIP` (1 use), `GIFT50` (5 uses).
@@ -110,6 +119,8 @@ src/
   init-db.js   Standalone `npm run db:init` script
 test/
   api.test.js  End-to-end API tests (npm test)
+Dockerfile           Multi-stage production image (non-root)
+.dockerignore
 docker-compose.yml   Local Postgres
 .env                 Connection config (git-ignored, loaded via dotenv)
 .env.example         Connection config template
