@@ -1,0 +1,225 @@
+{
+  "info": {
+    "_postman_id": "b1d3e5a0-0000-4a00-8000-redemptionapi01",
+    "name": "Redemption API",
+    "description": "Redemption point-deduction API.\n\n## Usage\n1. Set the `baseUrl` collection variable (default: https://redemption-dev.thixpin.me). For local: http://localhost:3000.\n2. Run the collection (or the folders) top-to-bottom: **Codes → Create code** generates a unique `{{code}}` and `{{userId}}` that the Redeem/Redemptions requests reuse.\n\nEach request includes test assertions, so it works with the Collection Runner / Newman.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://redemption-dev.thixpin.me", "type": "string" },
+    { "key": "code", "value": "", "type": "string" },
+    { "key": "userId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health & Metrics",
+      "item": [
+        {
+          "name": "Health check",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] } },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                "pm.test('status field is ok', () => pm.expect(pm.response.json().status).to.eql('ok'));"
+              ] }
+            }
+          ]
+        },
+        {
+          "name": "Prometheus metrics",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/metrics", "host": ["{{baseUrl}}"], "path": ["metrics"] } },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                "pm.test('exposes request histogram', () => pm.expect(pm.response.text()).to.include('http_request_duration_seconds_count'));"
+              ] }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Codes",
+      "item": [
+        {
+          "name": "List codes",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/codes", "host": ["{{baseUrl}}"], "path": ["api", "codes"] } },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                "pm.test('returns a codes array', () => pm.expect(pm.response.json().codes).to.be.an('array'));"
+              ] }
+            }
+          ]
+        },
+        {
+          "name": "Create code",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": { "type": "text/javascript", "exec": [
+                "// Generate a unique code + user for a clean, repeatable run.",
+                "pm.collectionVariables.set('code', 'PM-' + Date.now());",
+                "pm.collectionVariables.set('userId', 'pm-user-' + Date.now());"
+              ] }
+            },
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                "pm.test('echoes the created code', () => pm.expect(pm.response.json().code.code).to.eql(pm.collectionVariables.get('code')));",
+                "pm.test('redeemedCount starts at 0', () => pm.expect(pm.response.json().code.redeemedCount).to.eql(0));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"{{code}}\",\n  \"reward\": \"10% off\",\n  \"maxRedemptions\": 2\n}" },
+            "url": { "raw": "{{baseUrl}}/api/codes", "host": ["{{baseUrl}}"], "path": ["api", "codes"] }
+          }
+        },
+        {
+          "name": "Create code - duplicate (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 409', () => pm.response.to.have.status(409));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"{{code}}\",\n  \"reward\": \"duplicate\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/codes", "host": ["{{baseUrl}}"], "path": ["api", "codes"] }
+          }
+        },
+        {
+          "name": "Create code - invalid (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 400', () => pm.response.to.have.status(400));",
+                "pm.test('returns an error', () => pm.expect(pm.response.json()).to.have.property('error'));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"missing-reward\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/codes", "host": ["{{baseUrl}}"], "path": ["api", "codes"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Redeem",
+      "item": [
+        {
+          "name": "Redeem code",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 201', () => pm.response.to.have.status(201));",
+                "pm.test('reports remaining redemptions', () => pm.expect(pm.response.json()).to.have.property('remaining'));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"{{code}}\",\n  \"userId\": \"{{userId}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/redeem", "host": ["{{baseUrl}}"], "path": ["api", "redeem"] }
+          }
+        },
+        {
+          "name": "Redeem again - same user (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 409', () => pm.response.to.have.status(409));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"{{code}}\",\n  \"userId\": \"{{userId}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/redeem", "host": ["{{baseUrl}}"], "path": ["api", "redeem"] }
+          }
+        },
+        {
+          "name": "Redeem unknown code (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 404', () => pm.response.to.have.status(404));"
+              ] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [ { "key": "Content-Type", "value": "application/json" } ],
+            "body": { "mode": "raw", "raw": "{\n  \"code\": \"DOES-NOT-EXIST\",\n  \"userId\": \"{{userId}}\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/redeem", "host": ["{{baseUrl}}"], "path": ["api", "redeem"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Redemptions",
+      "item": [
+        {
+          "name": "List all redemptions",
+          "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/redemptions", "host": ["{{baseUrl}}"], "path": ["api", "redemptions"] } },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                "pm.test('returns a redemptions array', () => pm.expect(pm.response.json().redemptions).to.be.an('array'));"
+              ] }
+            }
+          ]
+        },
+        {
+          "name": "List redemptions by userId",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/redemptions?userId={{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "redemptions"],
+              "query": [ { "key": "userId", "value": "{{userId}}" } ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": { "type": "text/javascript", "exec": [
+                "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                "pm.test('only the requested user is returned', () => {",
+                "  const rows = pm.response.json().redemptions;",
+                "  rows.forEach(r => pm.expect(r.userId).to.eql(pm.collectionVariables.get('userId')));",
+                "});"
+              ] }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

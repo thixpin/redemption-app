@@ -12,6 +12,11 @@ app.use(metrics.metricsMiddleware);
 
 app.use(express.json());
 
+// Home Page (for browser testing)
+app.get("/", (req, res) => {
+  res.send("<h1>Redemption API</h1><p>See <a href='/api'>/api</a> for the API.</p>");
+});
+
 // Health check.
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
