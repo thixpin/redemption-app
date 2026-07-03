@@ -42,8 +42,8 @@ app.use((err, req, res, next) => {
 });
 
 async function start() {
-  await db.initSchema();
-  await db.seed();
+  // Schema migrations run as a separate PreSync Job (npm run migrate), not on
+  // boot — so scaling to dozens of pods never triggers concurrent migrations.
   const server = app.listen(PORT, () => {
     console.log(`Redemption API listening on http://localhost:${PORT}`);
   });
