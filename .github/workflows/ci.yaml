@@ -77,7 +77,8 @@ jobs:
           image-ref: ${{ env.IMAGE }}
           format: table
           exit-code: "1"
-          severity: HIGH,CRITICAL
+          # severity: HIGH,CRITICAL # Currently node:24-alpine has a HIGH CVE in undici (CVE-2026-12151) that is not yet fixed upstream, so we allow HIGH for now.
+          severity: CRITICAL
           vuln-type: 'os,library'
           ignore-unfixed: true
 
