@@ -6,6 +6,10 @@ const router = express.Router();
 // Wrap async handlers so rejected promises reach the error middleware.
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+router.get("/", (req, res) => {
+  res.json({ message: "Redemption API is running." });
+});
+
 // List all redemption codes.
 router.get(
   "/codes",
