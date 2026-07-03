@@ -2,9 +2,13 @@ require("dotenv").config();
 const express = require("express");
 const routes = require("./routes");
 const db = require("./db");
+const metrics = require("./metrics");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Record request metrics first so timing covers the full request lifecycle.
+app.use(metrics.metricsMiddleware);
 
 app.use(express.json());
 
@@ -12,6 +16,9 @@ app.use(express.json());
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
+
+// Prometheus scrape endpoint.
+app.get("/metrics", metrics.metricsHandler);
 
 app.use("/api", routes);
 

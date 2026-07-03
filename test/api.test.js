@@ -161,3 +161,17 @@ test("GET /api/redemptions filters by userId", async () => {
   assert.equal(alice.body.redemptions.length, 1);
   assert.equal(alice.body.redemptions[0].userId, "alice");
 });
+
+test("GET /metrics exposes Prometheus metrics", async () => {
+  // Generate a request so the histogram has at least one sample.
+  await request(app).get("/health");
+
+  const res = await request(app).get("/metrics");
+  assert.equal(res.status, 200);
+  assert.match(res.headers["content-type"], /text\/plain/);
+  // Default process metrics + our HTTP histogram are present.
+  assert.match(res.text, /process_cpu_seconds_total/);
+  assert.match(res.text, /http_request_duration_seconds_count/);
+  // The /health request was recorded with its route + status label.
+  assert.match(res.text, /route="\/health"[^}]*status_code="200"/);
+});
