@@ -32,18 +32,22 @@ for all options. `.env` is git-ignored so real credentials aren't committed.
 
 ```bash
 npm install
-npm run db:init   # optional — create tables + seed (also done on server start)
+npm run db:init   # create tables + seed demo codes (dev only)
 npm start         # http://localhost:3000
 npm run dev       # auto-restart on changes
 ```
 
-The server creates its tables and seeds demo codes automatically on startup.
+The server does **not** touch the schema on startup — run `npm run db:init`
+once locally. In Kubernetes, `npm run migrate` runs as an Argo CD PreSync Job
+before each rollout (migrations are decoupled from the app lifecycle so a burst
+of autoscaled pods never runs them concurrently).
 
 ## Endpoints
 
 | Method | Path                | Description                          |
 | ------ | ------------------- | ------------------------------------ |
 | GET    | `/health`           | Health check                         |
+| GET    | `/metrics`          | Prometheus metrics (request histogram + process metrics) |
 | GET    | `/api/codes`        | List all codes                       |
 | POST   | `/api/codes`        | Create a code                        |
 | POST   | `/api/redeem`       | Redeem a code for a user             |
@@ -90,6 +94,24 @@ docker compose exec db psql -U redemption -d redemption -c "CREATE DATABASE rede
 npm test
 ```
 
+### Smoke test (any live environment)
+
+`scripts/smoke-test.sh` exercises **every endpoint** against a running instance —
+12 checks covering happy paths and error paths (duplicate code, double redeem,
+unknown code/route, malformed JSON), asserting the expected HTTP status for
+each. It creates one timestamped throwaway code/user per run and exits non-zero
+on any failure, so it doubles as a post-deploy gate in CI.
+
+```bash
+./scripts/smoke-test.sh                                      # local (http://localhost:3000)
+./scripts/smoke-test.sh https://redemption-dev.thixpin.me    # dev
+./scripts/smoke-test.sh https://redemption-api.thixpin.me    # prod
+```
+
+A Postman collection with the same coverage lives in
+`postman/Redemption-API.postman_collection.json` (set the `baseUrl` variable;
+runnable top-to-bottom in the Collection Runner or `newman`).
+
 ## Docker
 
 ```bash
@@ -99,9 +121,10 @@ docker run -p 3000:3000 \
   redemption-api:latest
 ```
 
-## Seeded demo codes
+## Seeded demo codes (dev only, via `npm run db:init`)
 
 `WELCOME10` (100 uses), `FREESHIP` (1 use), `GIFT50` (5 uses).
+Production is never seeded — load real codes through the API.
 
 ## Schema
 
@@ -115,11 +138,17 @@ src/
   server.js    Express app, middleware, startup, graceful shutdown
   routes.js    Route handlers + validation
   store.js     Data-access layer (async, transactional redeem)
-  db.js        pg connection pool + schema/seed
-  init-db.js   Standalone `npm run db:init` script
+  db.js        pg connection pool + schema/seed helpers
+  metrics.js   Prometheus instrumentation (/metrics, request histogram)
+  migrate.js   Schema migration entrypoint (`npm run migrate`, k8s PreSync Job)
+  init-db.js   Standalone `npm run db:init` script (dev: tables + demo seed)
 test/
   api.test.js  End-to-end API tests (npm test)
-Dockerfile           Multi-stage production image (non-root)
+scripts/
+  smoke-test.sh          12-check live-endpoint smoke test (local/dev/prod)
+postman/                 Postman collection (same coverage)
+.github/workflows/       ci (PR tests) · deploy-dev (develop) · deploy-prod (v* tags)
+Dockerfile           Multi-stage production image (non-root, multi-arch via CI)
 .dockerignore
 docker-compose.yml   Local Postgres
 .env                 Connection config (git-ignored, loaded via dotenv)
