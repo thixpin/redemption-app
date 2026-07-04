@@ -1,0 +1,129 @@
+name: Deploy Dev
+
+# Continuous deployment to the DEV environment: every push to `develop`
+# tests, builds a multi-arch image, scans it, pushes to the dev account's ECR,
+# and bumps the dev overlay in redemption-infra (Argo CD syncs the rollout).
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-1
+  ECR_REPOSITORY: redemption/redemption-api
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: redemption
+          POSTGRES_PASSWORD: redemption
+          POSTGRES_DB: redemption_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U redemption"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgres://redemption:redemption@localhost:5432/redemption_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image ref
+        run: echo "IMAGE=${{ steps.ecr.outputs.registry }}/${ECR_REPOSITORY}:${GITHUB_SHA::12}" >> "$GITHUB_ENV"
+
+      # Cluster nodes are arm64 (Graviton) and amd64 (Karpenter), so build both.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Build amd64 locally first so Trivy can scan it before anything is pushed.
+      - name: Build (amd64) for scan
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner — fail on CRITICAL
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          format: table
+          exit-code: "1"
+          # severity: HIGH,CRITICAL # node:24-alpine has a HIGH CVE in undici (CVE-2026-12151) not yet fixed upstream
+          severity: CRITICAL
+          vuln-type: "os,library"
+          ignore-unfixed: true
+
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # GitOps deploy: bump the dev overlay's image tag; Argo CD rolls it out.
+      - name: Check out infra repo
+        uses: actions/checkout@v4
+        with:
+          repository: thixpin/redemption-infra
+          ref: main
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
+          path: infra
+
+      - name: Bump dev overlay image tag
+        working-directory: infra/k8s/app/overlays/dev
+        env:
+          IMAGE_NAME: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+        run: |
+          export TAG="${GITHUB_SHA::12}"
+          yq -i '(.images[] | select(.name == strenv(IMAGE_NAME)) | .newTag) = strenv(TAG)' kustomization.yaml
+          cat kustomization.yaml
+
+      - name: Commit and push tag bump
+        working-directory: infra
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add k8s/app/overlays/dev/kustomization.yaml
+          git commit -m "deploy(dev): redemption-api ${GITHUB_SHA::12}" \
+            || { echo "Image tag unchanged, nothing to deploy."; exit 0; }
+          git push
